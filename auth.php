@@ -319,7 +319,7 @@ class auth_plugin_authnc extends DokuWiki_Auth_Plugin
             msg((string) $grp);
             $groups[(string)$grp] = (string)$grp;
         }
-        msg($groups);
+        msg(implode(',', $groups));
         return $groups;
     }
 
