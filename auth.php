@@ -39,6 +39,10 @@ class auth_plugin_authnc extends DokuWiki_Auth_Plugin
             CURLOPT_HTTPHEADER => array("OCS-APIRequest:true"),
             CURLOPT_RESOLVE => array($this->con), // Optimize requests by pre-resolving the address.
         );
+        if ($this->getConf('verify-ssl') === false) {
+            $opts[CURLOPT_SSL_VERIFYPEER] = false;
+            $opts[CURLOPT_SSL_VERIFYHOST] = false;
+        }
         curl_setopt_array($this->curl, $options);
 
         $this->cando['addUser']     = false; // can Users be created?
@@ -421,8 +425,17 @@ class auth_plugin_authnc extends DokuWiki_Auth_Plugin
     protected function server_online() {
         if ($this->con) return true; // some link is already set
         // check if the server is reachable by opening a socket
+        $contextOptions = [];
+        if ($this->getConf('ssl-noverify') === false) {
+            $contextOptions['ssl'] = [
+                'verify_peer' => false,
+                'verify_peer_name' => false
+            ];
+        }
+        $context = stream_context_create($contextOptions);
         $host = explode(':', $this->getConf('server'));
-        $fp = fSockOpen('ssl:' . $host[1], $this->getConf('port'), $errno, $errstr, 5);
+        $hostname = 'ssl:'.$host[1].':'.($this->getConf('port'));
+        $fp = stream_socket_client($hostname, $errno, $errstr, 5, STREAM_CLIENT_CONNECT, $context);
         if (!$fp) return false; // server is not reachable
         $this->con = $this->getConf('server') . ':' . $this->getConf('port') . '/' . $this->getConf('ocs-path');
         return true; // no more error checking, assume reachable
