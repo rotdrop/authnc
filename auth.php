@@ -125,7 +125,6 @@ class auth_plugin_authnc extends DokuWiki_Auth_Plugin
                 foreach ($xml->data->groups->element as $grp) {
                     $groups[] = (string)$grp;
                 }
-                msg(print_r($groups, true));
                 // set the globals if authed
                 $USERINFO['name'] = (string)$xml->data->displayname;
                 $USERINFO['mail'] = (string)$xml->data->email;
@@ -352,10 +351,8 @@ class auth_plugin_authnc extends DokuWiki_Auth_Plugin
         }
         $groups = array();
         foreach ($xml->data->groups->element as $grp) {
-            msg((string) $grp);
             $groups[(string)$grp] = (string)$grp;
         }
-        msg(implode(',', $groups));
         return $groups;
     }
 
