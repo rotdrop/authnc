@@ -21,6 +21,9 @@ class auth_plugin_authnc extends DokuWiki_Auth_Plugin
     /** @var curl configuration */
     protected $curl = NULL;
 
+    /** @var string */
+    protected $appToken = null;
+
     /**
      * Constructor.
      */
@@ -60,10 +63,15 @@ class auth_plugin_authnc extends DokuWiki_Auth_Plugin
 
         if (!function_exists('curl_init') || ! $this->server_online()) {
             $this->success = false;
+            return;
         }
+        // Optimize requests by pre-resolving the address.
+        curl_setopt($this-curl, CURLOPT_RESOLVE, $this->con);
+
+        $this->appToken = $this->getConf('app-token');
+
         $this->success = true;
     }
-
 
     /**
      * Log off the current user [ OPTIONAL ]
@@ -93,7 +101,15 @@ class auth_plugin_authnc extends DokuWiki_Auth_Plugin
 
             // try the login
             $server = $this->con . 'users/' . $user;
-            $xml = $this->nc_request($server, $user, $pass);
+            if (!empty($this->appToken)) {
+                $xml = $this->nc_request($server . '/check-password', null, [ 'password' => $pass ]);
+                if ($xml && $xml->meta->status == 'ok' && (bool)$xml->data->valid) {
+                    // retrieve user data by second query
+                    $xml = $this->nc_request($server);
+                }
+            } else {
+                $xml = $this->nc_request($server, $user . ':' . $pass);
+            }
             $logged_in = false;
 
             if ($xml && $xml->meta->status == "ok") {
@@ -109,6 +125,7 @@ class auth_plugin_authnc extends DokuWiki_Auth_Plugin
                 foreach ($xml->data->groups->element as $grp) {
                     $groups[] = (string)$grp;
                 }
+                msg(print_r($groups, true));
                 // set the globals if authed
                 $USERINFO['name'] = (string)$xml->data->displayname;
                 $USERINFO['mail'] = (string)$xml->data->email;
@@ -244,7 +261,7 @@ class auth_plugin_authnc extends DokuWiki_Auth_Plugin
     {
         global $USERINFO;
         $server = $this->con . 'users';
-        $xml = $this->nc_request($server, $_SESSION[DOKU_COOKIE]['auth']['user'], $_SESSION[DOKU_COOKIE]['auth']['pass']);
+        $xml = $this->nc_request($server);
         if (! $xml || ! $xml->data->users) {
             msg("Retrieving user list failed");
             return array();
@@ -263,7 +280,7 @@ class auth_plugin_authnc extends DokuWiki_Auth_Plugin
             }
 
             $server = $this->con . 'users/' . (string)$user;
-            $xml = $this->nc_request($server, $_SESSION[DOKU_COOKIE]['auth']['user'], $_SESSION[DOKU_COOKIE]['auth']['pass']);
+            $xml = $this->nc_request($server);
             if ($xml && $xml->meta->status == "ok" && $xml->data->enabled == '1') {
                 $usr['user'] = (string)$user;
                 $usr['name'] = (string)$xml->data->displayname;
@@ -292,7 +309,7 @@ class auth_plugin_authnc extends DokuWiki_Auth_Plugin
     public function getUserCount($filter = array())
     {
         $server = $this->con . 'users';
-        $xml = $this->nc_request($server, $_SESSION[DOKU_COOKIE]['auth']['user'], $_SESSION[DOKU_COOKIE]['auth']['pass']);
+        $xml = $this->nc_request($server);
         if (! $xml || ! $xml->data->users) {
             msg("Retrieving user count failed");
             return 0;
@@ -328,7 +345,7 @@ class auth_plugin_authnc extends DokuWiki_Auth_Plugin
     public function retrieveGroups($start = 0, $limit = 0)
     {
         $server = $this->con . 'groups';
-        $xml = $this->nc_request($server, $_SESSION[DOKU_COOKIE]['auth']['user'], $_SESSION[DOKU_COOKIE]['auth']['pass']);
+        $xml = $this->nc_request($server);
         if (! $xml || ! $xml->data->groups) {
             msg("Retrieving groups failed");
             return array();
@@ -452,15 +469,25 @@ class auth_plugin_authnc extends DokuWiki_Auth_Plugin
      * and https://help.nextcloud.com/t/api-error-creating-user-failure-998-invalid-query/56530
      *
      * @param string $url  request url, shall return xml
-     * @param string $user the user name
+     * @param null|string $userPass the user name and password
+     * USER:PASS. If null either the credentials from the $_SESSION is
+     * used or the app-password, if present.
      * @param string $pass the users password
      *
      * @return object the parsed xml or NULL
      */
-    protected function nc_request($url, $user, $pass) {
-        curl_setopt($this->curl, CURLOPT_USERPWD, $user . ':' . $pass);
+    protected function nc_request($url, $userPass = null, $post = []) {
+        if (empty($userPass)) {
+            $userPass = empty($this->appToken)
+                ? $_SESSION[DOKU_COOKIE]['auth']['user'] . ':' . $_SESSION[DOKU_COOKIE]['auth']['pass']
+                : $this->appToken;
+        }
+        curl_setopt($this->curl, CURLOPT_USERPWD, $userPass);
         curl_setopt($this->curl, CURLOPT_URL, $url);
-
+        curl_setopt($this->curl, CURLOPT_POST, (int)!empty($post));
+        if (!empty($post)) {
+            curl_setopt($this->curl, CURLOPT_POSTFIELDS, http_build_query($post));
+        }
         if ($result = curl_exec($this->curl)) {
             return simplexml_load_string($result);
         } else {
@@ -468,4 +495,5 @@ class auth_plugin_authnc extends DokuWiki_Auth_Plugin
             return NULL;
         }
     }
+
 }

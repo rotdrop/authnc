@@ -9,3 +9,5 @@
 $meta['server']   = array('string');
 $meta['port']     = array('string');
 $meta['ocs-path'] = array('string');
+$meta['app-token'] = array('string');
+$meta['verify-ssl'] = array('onoff');

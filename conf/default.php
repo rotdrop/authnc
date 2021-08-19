@@ -9,3 +9,4 @@ $conf['server']   = 'https://cloud.example.com';
 $conf['port']     = '443';
 $conf['verify-ssl'] = true;
 $conf['ocs-path'] = '/ocs/v1.php/cloud/';
+$conf['app-token'] = 'USER:TOKEN';
