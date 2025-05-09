@@ -5,7 +5,7 @@
  * The commented functions are kept fore reference or later implementation.
  *
  * @license GPL 2 http://www.gnu.org/licenses/gpl-2.0.html
- * @author  Henrik Jürges <h.juerges@cobios.de>
+ * @author  Henrik Jürges <ratzeputz@rtzptz.xyz>
  */
 
 // must be run within Dokuwiki
@@ -15,9 +15,13 @@ if (!defined('DOKU_INC')) {
 
 class auth_plugin_authnc extends DokuWiki_Auth_Plugin
 {
-
+    /** @var the connection url */
     protected $con = NULL;
 
+    /** @var curl configuration */
+    protected $curl = NULL;
+
+    /** @var string */
     protected $appToken = null;
 
     /**
@@ -26,8 +30,23 @@ class auth_plugin_authnc extends DokuWiki_Auth_Plugin
     public function __construct()
     {
         parent::__construct(); // for compatibility
-        global $config_cascade;
-        global $config;
+
+        $this->curl = curl_init();
+        $options = array(
+            CURLOPT_HTTPGET => 1, // default, but make clear
+            CURLOPT_RETURNTRANSFER => TRUE,
+            CURLOPT_ENCODING => '',
+            CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+            CURLOPT_IPRESOLVE => CURL_IPRESOLVE_V4,
+            CURLOPT_TCP_FASTOPEN => 1,
+            CURLOPT_HTTPHEADER => array("OCS-APIRequest:true"),
+            CURLOPT_RESOLVE => array($this->con), // Optimize requests by pre-resolving the address.
+        );
+        if ($this->getConf('verify-ssl') === false) {
+            $opts[CURLOPT_SSL_VERIFYPEER] = false;
+            $opts[CURLOPT_SSL_VERIFYHOST] = false;
+        }
+        curl_setopt_array($this->curl, $options);
 
         $this->cando['addUser']     = false; // can Users be created?
         $this->cando['delUser']     = false; // can Users be deleted?
@@ -44,7 +63,10 @@ class auth_plugin_authnc extends DokuWiki_Auth_Plugin
 
         if (!function_exists('curl_init') || ! $this->server_online()) {
             $this->success = false;
+            return;
         }
+        // Optimize requests by pre-resolving the address.
+        curl_setopt($this-curl, CURLOPT_RESOLVE, $this->con);
 
         $this->appToken = $this->getConf('app-token');
 
@@ -57,6 +79,7 @@ class auth_plugin_authnc extends DokuWiki_Auth_Plugin
     public function logOff()
     {
         // return nothing to log out
+        curl_close($this->curl);
     }
 
     /**
@@ -71,11 +94,11 @@ class auth_plugin_authnc extends DokuWiki_Auth_Plugin
     public function trustExternal($user, $pass, $sticky = false)
     {
         global $USERINFO;
-        global $conf;
         $sticky ? $sticky = true : $sticky = false; //sanity check
 
         // check only if a user tries to log in, otherwise the function is called with every pageload
         if (!empty($user)) {
+
             // try the login
             $server = $this->con . 'users/' . $user;
             if (!empty($this->appToken)) {
@@ -88,6 +111,7 @@ class auth_plugin_authnc extends DokuWiki_Auth_Plugin
                 $xml = $this->nc_request($server, $user . ':' . $pass);
             }
             $logged_in = false;
+
             if ($xml && $xml->meta->status == "ok") {
                 // hurray, we're succeded
                 $logged_in = true;
@@ -113,7 +137,6 @@ class auth_plugin_authnc extends DokuWiki_Auth_Plugin
                 $_SESSION[DOKU_COOKIE]['auth']['pass'] = $pass;
                 $_SESSION[DOKU_COOKIE]['auth']['info'] = $USERINFO;
             }
-            return $logged_in;
         }
 
         // check if already logged in
@@ -122,8 +145,9 @@ class auth_plugin_authnc extends DokuWiki_Auth_Plugin
             $USERINFO['mail'] = $_SESSION[DOKU_COOKIE]['auth']['info']['mail'];
             $USERINFO['grps'] = $_SESSION[DOKU_COOKIE]['auth']['info']['grps'];
             $_SERVER['REMOTE_USER'] = $_SESSION[DOKU_COOKIE]['auth']['user'];
-            return true;
+            $logged_in = true;
         }
+        return $logged_in;
     }
 
     /**
@@ -162,7 +186,9 @@ class auth_plugin_authnc extends DokuWiki_Auth_Plugin
         $self['user'] = $_SESSION[DOKU_COOKIE]['auth']['user'];
         $self['name'] = $USERINFO['name'];
         $self['mail'] = $USERINFO['mail'];
-        $self['grps'] = $USERINFO['grps'];
+        if ($requireGroups) {
+            $self['grps'] = $USERINFO['grps'];
+        }
         return $self;
     }
 
@@ -187,7 +213,7 @@ class auth_plugin_authnc extends DokuWiki_Auth_Plugin
      */
     //public function createUser($user, $pass, $name, $mail, $grps = null)
     //{
-        // FIXME implement
+    // FIXME implement
     //    return null;
     //}
 
@@ -203,7 +229,7 @@ class auth_plugin_authnc extends DokuWiki_Auth_Plugin
      */
     //public function modifyUser($user, $changes)
     //{
-        // FIXME implement
+    // FIXME implement
     //    return false;
     //}
 
@@ -218,7 +244,7 @@ class auth_plugin_authnc extends DokuWiki_Auth_Plugin
      */
     //public function deleteUsers($users)
     //{
-        // FIXME implement
+    // FIXME implement
     //    return false;
     //}
 
@@ -251,6 +277,9 @@ class auth_plugin_authnc extends DokuWiki_Auth_Plugin
         $users[] = $self;
         foreach($xml->data->users->element as $user) {
             // Request the user information for every user, this may take a while
+            if ($user == $_SESSION[DOKU_COOKIE]['auth']['user']) {
+                continue; // Skip the session user
+            }
 
             $server = $this->con . 'users/' . (string)$user;
             $xml = $this->nc_request($server);
@@ -262,8 +291,8 @@ class auth_plugin_authnc extends DokuWiki_Auth_Plugin
                 foreach ($xml->data->groups->element as $grp) {
                     $groups[] = (string)$grp;
                 }
-                 $usr['grps'] = $groups;
-                 $users[] = $usr;
+                $usr['grps'] = $groups;
+                $users[] = $usr;
             }
         }
         return $users;
@@ -450,33 +479,21 @@ class auth_plugin_authnc extends DokuWiki_Auth_Plugin
     protected function nc_request($url, $userPass = null, $post = []) {
         if (empty($userPass)) {
             $userPass = empty($this->appToken)
-                      ? $_SESSION[DOKU_COOKIE]['auth']['user'] . ':' . $_SESSION[DOKU_COOKIE]['auth']['pass']
-            : $this->appToken;
+                ? $_SESSION[DOKU_COOKIE]['auth']['user'] . ':' . $_SESSION[DOKU_COOKIE]['auth']['pass']
+                : $this->appToken;
         }
-        $ret = NULL;
-        $ch = curl_init($url);
-        $opts = [
-            CURLOPT_HTTPGET => (int)empty($post), // default, but make clear
-            CURLOPT_POST => (int)!empty($post),
-            CURLOPT_RETURNTRANSFER => TRUE,
-            CURLOPT_USERPWD => $userPass,
-            CURLOPT_HTTPHEADER => array("OCS-APIRequest:true"),
-        ];
+        curl_setopt($this->curl, CURLOPT_USERPWD, $userPass);
+        curl_setopt($this->curl, CURLOPT_URL, $url);
+        curl_setopt($this->curl, CURLOPT_POST, (int)!empty($post));
         if (!empty($post)) {
-            $opts[CURLOPT_POSTFIELDS] = http_build_query($post);
+            curl_setopt($this->curl, CURLOPT_POSTFIELDS, http_build_query($post));
         }
-        if ($this->getConf('verify-ssl') === 0) {
-            $opts[CURLOPT_SSL_VERIFYPEER] = false;
-            $opts[CURLOPT_SSL_VERIFYHOST] = false;
-        }
-        curl_setopt_array($ch, $opts);
-        if (! $result = curl_exec($ch)) {
-            msg('Request failed with error ' . curl_error($ch) . '. Return code: ' . $result);
+        if ($result = curl_exec($this->curl)) {
+            return simplexml_load_string($result);
         } else {
-            $ret = simplexml_load_string($result);
+            msg('Request failed with error: ' . curl_error($this->curl) . '. Return code: ' . $result);
+            return NULL;
         }
-        curl_close($ch);
-        return $ret;
     }
 
 }

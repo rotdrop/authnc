@@ -2,9 +2,9 @@
 /**
  * english language file for authnc plugin
  *
- * @author Henrik Jürges <h.juerges@cobios.de>
+ * @author Henrik Jürges <ratzeputz@rtzptz.xyz>
  */
 
 $lang['server']   = 'Nextlcoud server hostname (e.g. https://cloud.example.com)';
 $lang['port']     = 'Nextcloud port (e.g. 443)';
-$lang['ocs-path'] = 'Path to the OCS API (e.g. /ocs/v1.php/cloud)';
+$lang['ocs-path'] = 'Path to the OCS API (e.g. /ocs/v1.php/cloud/)';
